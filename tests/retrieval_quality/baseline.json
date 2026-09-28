@@ -1,0 +1,6 @@
+{
+  "_note": "Synthetic stack (16 topics x 10 docs, untrained quantizer router, word-overlap reranker), 80 queries. Update only with a commit that explains the change.",
+  "end_to_end_recall@10": 0.9125,
+  "end_to_end_ndcg@10": 0.9125,
+  "generative_recall@100": 0.75
+}
