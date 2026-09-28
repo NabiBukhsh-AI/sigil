@@ -1,0 +1,53 @@
+# Model: large. ~770M parameters. The upper bound of the [TUNE] space in §6.2.
+#
+# [HONEST] §6.3. This config exists to be *tested against*, not to be shipped by default.
+# The gate is Recall@10 per unit of p95 latency, not Recall@10 alone. Published scaling
+# work is unambiguous that data quality dominates parameter count in this regime, so the
+# expected outcome of running this is that it does not justify its serving cost.
+#
+# If it wins by less than 2 points of Recall@10 over base, ship base.
+
+extends: base.yaml   # training, lora, and data blocks are inherited
+name: large
+id_schema: ids_v1
+
+model:
+  family: encoder_decoder_t5_variant
+  backbone_init: google/t5-v1_1-large
+
+  encoder:
+    layers: 24
+    d_model: 1024
+    n_heads: 16
+    d_ff: 2816
+    dropout: 0.1
+    position: relative_bucket_bias
+    max_input_tokens: 64
+    max_doc_tokens: 512
+    vocab: backbone_sentencepiece_32128
+
+  decoder:
+    layers: 6
+    d_model: 1024
+    n_heads: 16
+    d_ff: 2816
+    cross_attention: every_layer
+    position: learned_absolute_5
+    max_output_tokens: 5
+    vocab: identifier_only
+
+  identifier_vocab:
+    levels: 5
+    codes_per_level: 256
+    level_scoped: true
+    total_tokens: 1288
+
+  output_head:
+    type: per_level_projection
+    tied_to_decoder_input_embeddings: true
+
+  precision:
+    training: bf16_with_fp32_master
+    serving: fp16
+
+  parameter_count_estimate: 7.7e8

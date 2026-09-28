@@ -1,0 +1,67 @@
+# Decoding: default. Appendix B starting values. §10.3.
+#
+# Every value here is [TUNE] with a named gate. They ship as starting points, not as
+# settled answers, and the evaluation harness reports the gate metric for each.
+#
+# [FIXED] §10.1: no sampling of any kind in the serving path. Nucleus or temperature
+# sampling makes the candidate set a random variable, which destroys reproducibility,
+# caching, and debuggability for zero measured benefit.
+
+name: default
+
+decoding:
+  strategy: trie_constrained_beam
+  deterministic: true              # [FIXED] identical requests are bitwise identical
+
+  # [TUNE: start=64, space=[16,256], gate=Recall@10 vs p95 latency]
+  beam: 64
+  # [TUNE: start=2, space=[1,4], gate=Recall@10]
+  expansion: 2
+
+  # No length normalization. Every identifier has identical length, which removes the
+  # usual beam-search length bias entirely. §4.4.
+  length_normalization: false
+
+  terminal_fanout:
+    # ADR 0002. The decoder emits 4 levels; the trie and the reranker resolve the 5th.
+    enabled: true
+    # [TUNE: start=32, space=[8,128], gate=Recall@100]
+    prefixes_expanded: 32
+    # [TUNE: start=8, space=[1,64], gate=candidate count]
+    leaves_per_prefix: 8
+
+  # [TUNE: start=100, space=[50,400], gate=NDCG@10 vs rerank latency]
+  candidate_cap: 100
+  # §35B R6. Most queries are easy and paying for 100 rerank pairs on all of them is
+  # waste. When margin_1 is high and top scores are well separated, C drops.
+  adaptive_candidate_cap: true
+  adaptive_candidate_cap_min: 30
+  adaptive_candidate_cap_margin: 2.5
+
+  diversity:
+    # [TUNE: gate=result diversity and NDCG@10]
+    # Structural, not a penalty term: the identifier hierarchy already encodes semantic
+    # proximity, so "no more than 40% of the list from one level-1 code" is meaningful,
+    # cheap, and explainable. Disabled for narrow-intent queries (very high margin_1).
+    quota_l1: 0.4
+    disable_above_margin: 4.0
+
+  # §10.6 mitigations for irreversible prefix pruning.
+  adaptive_beam:
+    enabled: true
+    # Cheap because it applies only to uncertain queries.
+    widen_below_margin: 0.5
+    widened_beam: 128
+  multi_start:
+    # [TUNE, A/B] Force the beam to include the top-3 level-1 codes regardless of score,
+    # spending B/3 on each. Costs recall on easy queries, buys it on straddling ones.
+    enabled: false
+    forced_l1_codes: 3
+
+confidence:
+  # §4.5. Calibrated probability drives routing decisions only. Final ranking uses the
+  # reranker score, which is calibrated separately with isotonic regression.
+  temperature: 1.0                 # fit on held-out data in stage D
+  bias: 0.0
+  tau_conf: 0.30                   # below this, invoke the lexical channel
+  tau_margin: 0.50                 # low margin_1 means the query straddles regions

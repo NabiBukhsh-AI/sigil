@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Rust (libs/sigil_trie/native)
+target/
+Cargo.lock
+
+# uv
+uv.lock
+
+# Model and corpus artefacts. These belong in object storage, never in git.
+*.pt
+*.bin
+*.safetensors
+*.onnx
+*.npy
+*.npz
+*.parquet
+checkpoints/
+artifacts/
+mlruns/
+
+# Trie snapshots are content-addressed artefacts, not source.
+*.trie
+snapshots/
+
+# Codebooks are a versioned artefact published by the training pipeline.
+codebooks/
+*.codebook
+
+# Local corpora and generated datasets
+data/
+corpora/
+datasets/
+
+# Secrets and local config. Never commit these.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+local.yaml
+
+# OS / editors
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp

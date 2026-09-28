@@ -1,0 +1,59 @@
+# Identifier schema ids_v1.
+#
+# [FIXED] §5.3. This file defines the identifier space itself. Changing any value here
+# is a schema migration: full corpus reindex, full retrain, dual-bundle deployment.
+# See docs/adr/0004 and docs/runbooks/schema-migration.md before touching it.
+#
+# The schema version is part of every semantic_id row in the registry, every trie
+# snapshot header, and every bundle manifest. A model trained on one schema may never
+# read another schema's trie.
+
+schema_version: ids_v1
+
+identifiers:
+  # [FIXED] Four routing levels the decoder generates autoregressively, plus a terminal
+  # disambiguation level resolved by trie fan-out rather than by the model (ADR 0002).
+  levels: 4
+  codes_per_level: 256
+  terminal_level: true
+
+  # u = 255 is ESCAPE, meaning "one more byte level follows". Applies when a 4-level
+  # prefix accumulates more than 255 documents.
+  escape_code: 255
+  max_escape_depth: 2          # ESCAPE chains deeper than this are a quantizer failure
+
+  # Packed on-disk and in-registry form. 5 bytes normally, 6 when ESCAPE fires.
+  packing: big_endian_bytes
+
+quantizer:
+  kind: rq_kmeans_balanced
+
+  # Balanced assignment at the coarse levels only. Levels 3 and 4 use plain k-means:
+  # balancing them costs fit quality and buys nothing, because beam pruning happens
+  # overwhelmingly at levels 1 and 2.
+  balanced_levels: [1, 2]
+  balance_max_ratio: 3.0       # no level-1 code may hold more than 3x the mean occupancy
+  balance_penalty: 0.05        # capacity penalty weight in constrained assignment
+
+  # Fit configuration.
+  kmeans_iters: 50
+  kmeans_restarts: 3
+  kmeans_seed: 20260901        # determinism is a Phase 2 acceptance criterion
+  sample_size: 2000000         # documents sampled to fit; full corpus if smaller
+  embedding_dim: 768
+  normalize_embeddings: true   # L2 normalize before quantization
+
+thresholds:
+  # [TUNE: gate=escape_rate < 0.5%] Above this, the quantizer no longer fits the corpus
+  # and needs refitting, which is a full retrain. Tracked as sigil_escape_rate.
+  escape_rate_alarm: 0.005
+
+  # [FIXED] §24 F7. A 20 percent increase in reconstruction error on new documents means
+  # corpus drift has moved away from the fitted codebooks.
+  reconstruction_error_drift_alarm: 0.20
+
+  # §24 F4. Hysteresis on re-identification: content edits must move the embedding this
+  # far past the old centroid before a new identifier is allocated. Without it, documents
+  # that sit near a boundary churn identifiers on every edit.
+  reidentification_margin: 0.05
+  max_alias_chain_depth: 2     # beyond this the document is pinned to a stable identifier

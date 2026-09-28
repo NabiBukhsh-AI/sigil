@@ -1,0 +1,13 @@
+# Serving: prod. Overrides dev.yaml. Anything not listed here inherits the dev value,
+# which is deliberate: the tuned numbers must be the same numbers that were evaluated.
+extends: dev.yaml
+env: prod
+
+bundle:
+  manifest: s3://sigil-bundles/prod/active/manifest.json
+  require_signature: true           # [FIXED] §17.2. Nothing deploys unsigned.
+
+registry:
+  backend: postgres
+  dsn: ${SIGIL_REGISTRY_DSN}
+  redis_url: ${SIGIL_REDIS_URL}

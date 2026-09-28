@@ -1,0 +1,63 @@
+[project]
+name = "sigil"
+version = "0.1.0"
+description = "Trie-constrained generative retrieval over frozen residual-quantization semantic identifiers"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+# The identifier, trie, decoding, and eval layers need only numpy. They hold the
+# invariants and must stay testable without a GPU, Postgres, or Redis.
+dependencies = ["numpy>=1.26", "pyyaml>=6.0"]
+
+[project.optional-dependencies]
+serving = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx>=0.27",
+    "redis>=5.2",
+    "psycopg[binary,pool]>=3.2",
+    "prometheus-client>=0.21",
+    "opentelemetry-sdk>=1.29",
+]
+training = [
+    "torch>=2.5",
+    "transformers>=4.47",
+    "sentencepiece>=0.2",
+    "peft>=0.14",
+    "pyarrow>=18.0",
+]
+dev = ["pytest>=8.3", "hypothesis>=6.122", "ruff>=0.8"]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "libs/sigil_core",
+    "libs/sigil_identifiers",
+    "libs/sigil_trie",
+    "libs/sigil_model",
+    "libs/sigil_decoding",
+    "libs/sigil_data",
+    "libs/sigil_training",
+    "libs/sigil_eval",
+    "libs/sigil_registry_client",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["libs", "."]
+markers = [
+    "slow: benchmarks and scale tests, excluded from the default run",
+    "torch: requires torch",
+    "integration: requires Postgres, Redis, or object storage",
+]

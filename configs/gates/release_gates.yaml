@@ -1,0 +1,41 @@
+# Release gates. §25, §29.
+#
+# This file holds the thresholds. libs/sigil_eval/gates.py is the single source of truth
+# for how they are evaluated: CI, the training pipeline, and the deploy workflow all
+# import it. Gates defined in three places are gates enforced in zero.
+#
+# Every gate below blocks a release. Report-only metrics are not listed here.
+
+gates:
+  # [FIXED] Any value other than exactly 1.0 is a P1 bug, not a regression.
+  valid_id_rate_exact: 1.0
+
+  # Relative to the incumbent bundle.
+  ndcg_at_10_max_drop: 0.005
+  recall_at_10_max_drop_points: 1.0
+  mrr_at_10_max_drop: 0.01
+
+  # [FIXED] §7.5. Recall on documents excluded from query training but present in the
+  # trie. Measures true generalization, the cold-start capability the system depends on.
+  held_out_doc_recall_at_10_min: 0.40
+
+  # [FIXED] §15.5. Never ship an adapter that improves new-document recall while
+  # regressing the corpus. Rejection is the default outcome.
+  old_doc_recall_regression_max_points: 1.0
+  cold_doc_recall_min_ratio_of_steady_state: 0.6
+
+  ece_max: 0.05
+  stale_id_rate_max: 0.001
+  escape_rate_max: 0.005
+
+  # [FIXED] §14.3. Fallback-creep blockers. If a change improves NDCG mainly by
+  # increasing channel C share, it is rejected.
+  channel_c_query_share_max: 0.15
+  channel_a_result_share_min: 0.70
+
+  # System, relative to the incumbent.
+  p95_latency_max_increase_ratio: 0.15
+  cost_per_1k_queries_max_increase_ratio: 0.20
+
+  # §27. Any cross-tenant result in the poisoned-corpus suite blocks the release.
+  cross_tenant_leaks_max: 0

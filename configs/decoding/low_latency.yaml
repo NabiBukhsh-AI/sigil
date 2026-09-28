@@ -1,0 +1,44 @@
+# Decoding: low_latency. For interactive surfaces with a tight p95 budget.
+#
+# Trades recall for latency in the two places that actually cost time (§22.2): beam
+# width and the number of pairs sent to the reranker. Reranking, not decoding, is the
+# dominant GPU consumer at C=100, so candidate_cap is cut first.
+
+name: low_latency
+
+decoding:
+  strategy: trie_constrained_beam
+  deterministic: true
+  beam: 24
+  expansion: 2
+  length_normalization: false
+
+  terminal_fanout:
+    enabled: true
+    prefixes_expanded: 12
+    leaves_per_prefix: 4
+
+  candidate_cap: 40
+  adaptive_candidate_cap: true
+  adaptive_candidate_cap_min: 20
+  adaptive_candidate_cap_margin: 2.0
+
+  diversity:
+    quota_l1: 0.4
+    disable_above_margin: 3.5
+
+  adaptive_beam:
+    enabled: false                 # widening is exactly what this profile cannot afford
+    widen_below_margin: 0.5
+    widened_beam: 48
+  multi_start:
+    enabled: false
+    forced_l1_codes: 3
+
+confidence:
+  temperature: 1.0
+  bias: 0.0
+  # Raised: with a narrow beam, low-confidence queries are likelier to have lost their
+  # prefix, so hand them to the lexical channel sooner rather than decoding harder.
+  tau_conf: 0.40
+  tau_margin: 0.70

@@ -1,0 +1,50 @@
+# Model: small. ~60M parameters. For 10K-100K corpora and for fast ablations.
+#
+# §23.1: at 10K documents the whole exercise is arguably unnecessary, and at 100K a
+# 220M model is the sweet spot. This config exists so Experiment 12 (synthetic query
+# ablation: does data beat parameters?) has a lower rung on the ladder.
+
+extends: base.yaml   # training, lora, and data blocks are inherited
+name: small
+id_schema: ids_v1
+
+model:
+  family: encoder_decoder_t5_variant
+  backbone_init: google/t5-v1_1-small
+
+  encoder:
+    layers: 8
+    d_model: 512
+    n_heads: 8
+    d_ff: 1024
+    dropout: 0.1
+    position: relative_bucket_bias
+    max_input_tokens: 64
+    max_doc_tokens: 512
+    vocab: backbone_sentencepiece_32128
+
+  decoder:
+    layers: 4
+    d_model: 512
+    n_heads: 8
+    d_ff: 1024
+    cross_attention: every_layer
+    position: learned_absolute_5
+    max_output_tokens: 5
+    vocab: identifier_only
+
+  identifier_vocab:
+    levels: 5
+    codes_per_level: 256
+    level_scoped: true
+    total_tokens: 1288
+
+  output_head:
+    type: per_level_projection
+    tied_to_decoder_input_embeddings: true
+
+  precision:
+    training: bf16_with_fp32_master
+    serving: fp16
+
+  parameter_count_estimate: 6.0e7

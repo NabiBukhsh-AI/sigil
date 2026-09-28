@@ -1,0 +1,13 @@
+# Serving: staging. Overrides dev.yaml. Full-size corpus copy; the schema migration
+# runbook is rehearsed here before it is ever attempted in prod.
+extends: dev.yaml
+env: staging
+
+bundle:
+  manifest: s3://sigil-bundles/staging/active/manifest.json
+  require_signature: true
+
+registry:
+  backend: postgres
+  dsn: ${SIGIL_REGISTRY_DSN}
+  redis_url: ${SIGIL_REDIS_URL}

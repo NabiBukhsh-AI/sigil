@@ -1,0 +1,70 @@
+# Serving: dev. Single machine, no GPU required. In-memory registry, local trie file.
+# staging.yaml and prod.yaml override only what differs.
+
+env: dev
+decoding_profile: configs/decoding/default.yaml
+
+bundle:
+  manifest: artifacts/bundles/dev/manifest.json
+  require_signature: false          # prod: true. §17.2
+
+registry:
+  backend: memory                   # memory | postgres
+  dsn: null
+  redis_url: null
+  cache_ttl_seconds: 300
+
+trie:
+  snapshot_dir: artifacts/tries
+  snapshot_minutes: 15              # §12.4 trie removal cadence
+
+# §13. Verification and reranking.
+verification:
+  reranker_layers: 6
+  reranker_dim: 384
+  max_pairs: 400
+  max_input_tokens: 256
+  # [TUNE: start=0.35] Below this, mark low_confidence and attach lexical results. Do not
+  # silently hand weak documents to an LLM that will treat them as authoritative.
+  tau_relevant: 0.35
+  audit_kendall_tau_below: 0.2
+
+# §13.3. [TUNE: fit by LambdaMART or logistic regression, gate=NDCG@10]
+blending:
+  w_cross_encoder: 0.70
+  w_generative: 0.15
+  w_bm25: 0.10
+  w_prior: 0.05
+
+# §14.2, §16. Hard caps, not suggestions.
+lifecycle:
+  hot_set_max_ratio: 0.03
+  hot_set_alarm_ratio: 0.05
+  hot_set_block_ingest_ratio: 0.10
+  hot_retention_after_refresh_days: 7   # §35B R5
+  adapter_refresh: nightly
+  adapter_min_batch: 2000
+  replay_ratio: 3.0
+  full_retrain: quarterly
+  alias_ttl_days: 30
+  content_retention_days: 30
+
+# §21, §27. Server-side caps override client options.
+limits:
+  channel_c_max_query_share: 0.15
+  channel_c_page_query_share: 0.25
+  channel_a_min_result_share: 0.70
+  max_beam_client: 128
+  max_candidate_cap_client: 400
+  max_k: 100
+  max_query_chars: 2048
+
+# §22.4. Per-channel deadlines; on expiry return what completed with degraded_mode=true.
+deadlines_ms:
+  generative: 60
+  lexical: 25
+  rerank: 40
+
+candidate_cache:
+  enabled: true
+  max_entries: 100000

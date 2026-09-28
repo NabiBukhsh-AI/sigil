@@ -1,0 +1,223 @@
+# Model: base. ~220M parameters. The default and the recommended starting point.
+#
+# §6.2. Backbone initialization matters more than size: published scaling work found
+# that naively scaling generative retrievers to 11B yielded far less than expected, and
+# that the dominant factor was the quality and diversity of synthetic queries used as
+# document representations. Spend on data, not on parameters.
+#
+# [HONEST] If a 220M model with good data loses to a 3B model with the same data by less
+# than 2 points of Recall@10, ship the 220M model.
+
+name: base
+id_schema: ids_v1
+
+model:
+  family: encoder_decoder_t5_variant
+  backbone_init: google/t5-v1_1-base    # [TUNE: t5-v1_1-base vs flan-t5-base; ablate]
+
+  encoder:
+    layers: 12
+    d_model: 768
+    n_heads: 12
+    d_ff: 3072
+    dropout: 0.1
+    position: relative_bucket_bias       # inherited from the backbone
+    # [TUNE: start=64, space=[32,128], gate=truncation_rate < 0.5%]
+    max_input_tokens: 64                 # queries
+    max_doc_tokens: 512                  # document-side indexing examples
+    vocab: backbone_sentencepiece_32128  # text side only
+
+  decoder:
+    # [TUNE: start=4, space=[2,8], gate=Recall@10]
+    # The output is exactly 5 tokens, so decoder depth buys much less than encoder depth
+    # per unit of latency. A 12/4 split costs ~30% less per query than symmetric 12/12.
+    layers: 4
+    d_model: 768
+    n_heads: 12
+    d_ff: 3072
+    cross_attention: every_layer
+    position: learned_absolute_5         # relative bias is pointless at length 5
+    max_output_tokens: 5                 # 6 when ESCAPE fires
+    vocab: identifier_only
+
+  identifier_vocab:
+    # [FIXED] §4.3. Level-scoped token ids: token = BASE + (level-1)*256 + code.
+    # The softmax at step l can never emit a code from another level even before masking,
+    # which removes an entire class of decoding bug and makes trie masks exact.
+    levels: 5
+    codes_per_level: 256
+    level_scoped: true
+    total_tokens: 1288                   # 1280 codes + 8 specials
+
+  output_head:
+    # [TUNE: shared vs per-level, gate=exact_id_accuracy]
+    # Five projections of 768x256 rather than one 768x1280. Identical cost, but per-level
+    # heads stabilize training when the same integer means different things at different
+    # depths. A minimal version of NCI's PAWA decoder without its parameter blowup.
+    type: per_level_projection
+    tied_to_decoder_input_embeddings: true
+
+  precision:
+    training: bf16_with_fp32_master
+    serving: fp16                        # [TUNE: int8 weight-only encoder after quality gate]
+
+  parameter_count_estimate: 2.1e8
+
+# ---------------------------------------------------------------------------
+# Training. §8.7, Appendix B.
+# ---------------------------------------------------------------------------
+training:
+  stages:
+    # Stage A: indexing and retrieval seq2seq objective. Cross-entropy over the code
+    # sequence with per-level weighting.
+    a_indexing:
+      # [TUNE, benchmark required] Run until exact_id_accuracy on train plateaus.
+      steps: 300000
+      optimizer: adamw
+      betas: [0.9, 0.98]
+      weight_decay: 0.01
+      lr_schedule: linear_warmup_inverse_sqrt
+      warmup_steps: 5000
+      peak_lr_heads: 1.0e-3          # from-scratch identifier heads
+      peak_lr_backbone: 1.0e-4
+      batch_tokens: 65000            # [TUNE]
+      precision: bf16
+      # Label smoothing on levels 1..4 only. [HONEST] It improves recall slightly and
+      # degrades calibration measurably; stage D recalibrates rather than skipping it.
+      label_smoothing: 0.1
+      # [TUNE] The terminal ordinal is downweighted because it is memorization, and
+      # over-weighting it burns capacity that belongs to the routing levels.
+      level_weights: [1.0, 1.0, 1.0, 1.0, 0.5]
+      # Optional in stage A, mandatory in the incremental track. Roughly doubles step cost.
+      sam_enabled: false
+      sam_rho: 0.05
+
+    # Stage B: prefix-oriented ranking. §8.2. Cross-entropy optimizes the probability of
+    # the full correct sequence, but beam search survives or dies at each prefix. A model
+    # can assign high total likelihood to the right identifier while ranking its level-2
+    # prefix eleventh, in which case a beam of 10 loses the document permanently.
+    b_prefix_rank:
+      steps: 40000
+      optimizer: adamw
+      lr: 1.0e-5
+      warmup_steps: 500
+      lr_schedule: constant
+      batch_tokens: 16000
+      precision: bf16
+      sam_enabled: false
+      # [TUNE: start m = [0.5,0.5,1.0,1.0,1.0]] Margin increases with prefix length.
+      margins: [0.5, 0.5, 1.0, 1.0, 1.0]
+      # [TUNE: start=1.0, space=[0.2,3.0]]
+      lambda_rank: 1.0
+
+    # Stage C: self-negative refinement. Run the current model with constrained beam
+    # search over training queries; any identifier ranked above the true positive is a
+    # self-negative. The cheapest source of genuinely hard negatives.
+    c_self_negative:
+      # [TUNE: start=2, space=[1,4], gate=MRR@10]
+      rounds: 2
+      steps_per_round: 20000
+      lr: 1.0e-5
+      beam: 64
+
+    # Stage D: confidence calibration. Freeze the model, fit a single temperature on
+    # held-out data. A model whose confidence does not correlate with correctness cannot
+    # drive the fallback policy, and an uncalibrated trigger is how the lexical channel
+    # silently eats the traffic.
+    d_calibration:
+      method: temperature_scaling
+      link: logistic
+      report_ece_before_after: true
+      ece_gate: 0.05
+
+  # Active only during incremental adapter training (§15), where drift from the
+  # previously deployed checkpoint is itself a risk. Zero during full training.
+  lambda_reg_proximal: 0.0
+
+  checkpointing:
+    every_steps: 5000
+    keep_last: 5
+    keep_best_by: recall_at_10
+
+# LoRA adapter track for incremental corpora. §15.5.
+lora:
+  # [FIXED] Decoder and cross-attention only. The encoder holds general query
+  # understanding and must not be perturbed by a small batch of new documents.
+  target_modules: [decoder_self_attn, decoder_cross_attn, decoder_ffn]
+  freeze_encoder: true
+  rank: 16
+  alpha: 32
+  dropout: 0.05
+  sam_enabled: true                  # mandatory in the incremental track
+  sam_rho: 0.05
+
+# ---------------------------------------------------------------------------
+# Training data construction. §7.2, §9.1, Appendix B.
+# ---------------------------------------------------------------------------
+data:
+  queries_per_doc: 10
+  # [FIXED] §7.4. Every retrieval unit gets at least 8 accepted training examples. Units
+  # that repeatedly fail the round-trip filter are flagged LOW_COVERAGE and permanently
+  # routed to the lexical channel. Some documents cannot be described by a generated
+  # query, and pretending otherwise silently destroys recall.
+  min_queries_per_doc: 8
+  max_queries_per_doc: 20
+  zero_log_coverage_upsample: 1.5
+
+  # [TUNE: ratios, gate=Recall@10 and long_tail_recall]
+  # The classic DSI indexing task (document text to identifier) is retained at only 10
+  # percent: published evidence indicates that synthetic queries as the document
+  # representation, rather than raw document text, is what makes this work at scale.
+  family_ratios:
+    synthetic: 0.60
+    logs: 0.15                       # up to 0.40 once real logs exist; weight 3x
+    titles: 0.10
+    content_prefix: 0.10
+    metadata: 0.05
+
+  # §9.1. Prefix siblings are the highest-value negative class in this architecture
+  # because they are exactly the competitors the beam must beat at each step.
+  negatives:
+    prefix_sibling: 0.40
+    self: 0.25
+    bm25: 0.20
+    dense: 0.10                      # offline ANN only. Never deployed. ADR 0006.
+    random: 0.05
+
+  synthetic_query_generation:
+    # [TUNE: start=distilled 250M doc2query, space=[distilled, 7B instruct],
+    #        gate=cost per doc and downstream Recall@10]
+    generator: distilled_doc2query_250m
+    temperature: 0.9
+    top_p: 0.95
+    n_generated: 16                  # then filtered to queries_per_doc
+    dedup_trigram_jaccard: 0.8
+    # Round-trip consistency: keep q' only if BM25 ranks the source document in its
+    # top 50. Removes hallucinated queries. Expect to discard 15 to 30 percent.
+    roundtrip_filter_top_n: 50
+    # Force a mix. Unbalanced generators produce uniformly well-formed questions and the
+    # model then fails on real keyword queries.
+    query_types: [factoid, procedural, comparative, symptom_framed, keyword]
+    # §7.5. Reject queries that copy the source; those teach copying, not retrieval.
+    max_ngram_overlap_n: 6
+    max_ngram_overlap_ratio: 0.5
+    # Use at least two generator prompts, and two generator models if affordable. Log
+    # which produced each example and evaluate per-generator to detect a monoculture.
+    min_distinct_prompts: 2
+
+  false_negative_filter:
+    # §9.3. Mined BM25 and ANN negatives are frequently relevant, and training on them
+    # actively teaches the model to suppress correct answers.
+    # [TUNE: start=0.7 on calibrated scale]
+    tau_fn: 0.7
+    delta_vs_positive: 0.1
+    drop_near_duplicates: true
+    # Above this, a mining source is more label noise than signal and its share is cut.
+    max_discard_rate_alarm: 0.25
+
+  held_out:
+    # [FIXED] §7.5. A slice of documents excluded from all query training examples but
+    # present in the trie. Recall on this slice is the cold-start capability the whole
+    # system depends on, and held_out_doc_recall@10 is a release gate.
+    document_fraction: 0.05
+    seed: 20260901

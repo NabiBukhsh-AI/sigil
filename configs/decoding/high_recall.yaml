@@ -1,0 +1,42 @@
+# Decoding: high_recall. For offline evaluation, the brute-force comparison in
+# Experiment 11, and batch workloads with no interactive latency budget.
+#
+# §10.6 [HONEST]: increasing beam width keeps improving effectiveness well past
+# practical latency budgets, and even a beam of 1000 does not reach the quality of
+# brute-force scoring of every leaf. This profile buys what is buyable and the
+# beam_recall_gap metric measures what is left on the table.
+
+name: high_recall
+
+decoding:
+  strategy: trie_constrained_beam
+  deterministic: true
+  beam: 256
+  expansion: 3
+  length_normalization: false
+
+  terminal_fanout:
+    enabled: true
+    prefixes_expanded: 128
+    leaves_per_prefix: 32
+
+  candidate_cap: 400             # the §21 server-side client cap, used in full here
+  adaptive_candidate_cap: false  # never trade recall for cost in this profile
+
+  diversity:
+    quota_l1: 1.0                # no quota: measuring reachable recall, not list quality
+    disable_above_margin: 99.0
+
+  adaptive_beam:
+    enabled: true
+    widen_below_margin: 1.5
+    widened_beam: 512
+  multi_start:
+    enabled: true
+    forced_l1_codes: 3
+
+confidence:
+  temperature: 1.0
+  bias: 0.0
+  tau_conf: 0.10
+  tau_margin: 0.15
