@@ -34,6 +34,9 @@ def setup(tmp_path_factory):
     synthetic = {c["doc_uid"]: [{"text": f"unique{i}{x} topic{t}word{j}"} for x in "abc" for j in range(4)]
                  for c, (t, i, _) in zip(corpus, docs, strict=True)}
     cfg = load_yaml("configs/model/base.yaml")
+    # 32 docs at the default 5% would leave the held-out slice empty in ~19% of runs (doc
+    # uids are random); 25% makes an empty slice a ~1e-4 event.
+    cfg["data"]["held_out"]["document_fraction"] = 0.25
     rows, rep = build_rows(corpus, synthetic, [], cfg, corpus_snapshot="cs_2026_09_01", id_schema="ids_v1")
     golden = [(query_for(t, i), {s.reg.children(s.parent[i])[0].doc_uid}) for t, i, _ in docs]
     cb_dir = tmp / "codebooks"

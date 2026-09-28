@@ -83,7 +83,11 @@ def train_bundle(*, model, tokenizer, rows: list[dict], cfg: dict, trie_path: st
     over = {"batch_size": batch_size, **({"steps": steps} if steps else {})}
     decode_cfg = DecodeConfig(beam=st["c_self_negative"]["beam"])
     sid_to_doc = {r["semantic_id"]: r["doc_uid"] for r in corpus}
-    calib, test = golden[: len(golden) // 2], golden[len(golden) // 2 :]
+    # Held-out-document queries are scarce and gate cold-start (§7.5): all of them go to
+    # evaluation, never to calibration. The rest split in half.
+    held_q = [g for g in golden if g[1] and g[1] <= held_out]
+    rest = [g for g in golden if not (g[1] and g[1] <= held_out)]
+    calib, test = rest[: len(rest) // 2], rest[len(rest) // 2 :] + held_q
     report: dict = {"bundle_id": bundle_id}
 
     with TrieSnapshot(trie_path, trie_sha256) as trie:
