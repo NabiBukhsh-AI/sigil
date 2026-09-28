@@ -27,6 +27,9 @@ identifiers:
 
 quantizer:
   kind: rq_kmeans_balanced
+  # The frozen dense encoder whose embeddings are quantized. Part of the schema: changing
+  # it moves every document and is a full retrain (§15.4).
+  embedding_model: BAAI/bge-base-en-v1.5
 
   # Balanced assignment at the coarse levels only. Levels 3 and 4 use plain k-means:
   # balancing them costs fit quality and buys nothing, because beam pruning happens

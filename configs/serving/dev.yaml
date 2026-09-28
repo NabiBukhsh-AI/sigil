@@ -2,7 +2,26 @@
 # staging.yaml and prod.yaml override only what differs.
 
 env: dev
+id_schema: ids_v1
 decoding_profile: configs/decoding/default.yaml
+
+# Service addresses, used by remote wiring. §20.3.
+endpoints:
+  generative: http://localhost:8081
+  reranker: http://localhost:8082
+  hot_lexical: http://localhost:8083
+  full_lexical: http://localhost:8084
+  registry: http://localhost:8085
+  ingestion: http://localhost:8086
+  version_manager: http://localhost:8087
+
+# §27. Static API keys for dev only. Staging and prod inject keys from a secret store and
+# terminate OAuth2 client credentials at the edge.
+auth:
+  api_keys:
+    dev-reader: {tenant: dev, roles: [], scopes: [retrieve]}
+    dev-writer: {tenant: dev, roles: [], scopes: [retrieve, write]}
+    dev-operator: {tenant: dev, roles: [], scopes: [retrieve, write, operator, erase]}
 
 bundle:
   manifest: artifacts/bundles/dev/manifest.json
