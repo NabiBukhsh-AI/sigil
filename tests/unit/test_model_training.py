@@ -14,45 +14,9 @@ from sigil_training.loop import LoopConfig, collate, train  # noqa: E402
 from sigil_training.objectives import divergence_level, rank_loss, seq_loss  # noqa: E402
 from sigil_training.replay import stratified_replay  # noqa: E402
 
+from tests.helpers import D, CharTok, tiny_model  # noqa: E402
+
 pytestmark = pytest.mark.torch
-D = 32
-
-
-class TinyEncoder(torch.nn.Module):
-    def __init__(self, vocab=64):
-        super().__init__()
-        self.emb = torch.nn.Embedding(vocab, D)
-        self.mix = torch.nn.Linear(D, D)
-
-    def forward(self, input_ids, attention_mask):
-        class Out:
-            pass
-
-        o = Out()
-        o.last_hidden_state = torch.tanh(self.mix(self.emb(input_ids)))
-        return o
-
-
-class CharTok:
-    """Whitespace-free char tokenizer shaped like a HF tokenizer call."""
-
-    def __call__(self, texts, padding=True, truncation=True, max_length=64, return_tensors="pt"):
-        texts = [texts] if isinstance(texts, str) else texts
-        ids = [[ord(c) % 63 + 1 for c in t][:max_length] for t in texts]
-        n = max(map(len, ids))
-        input_ids = torch.tensor([x + [0] * (n - len(x)) for x in ids])
-        mask = torch.tensor([[1] * len(x) + [0] * (n - len(x)) for x in ids])
-
-        class Enc(dict):
-            def to(self, device):
-                return Enc({k: v.to(device) for k, v in self.items()})
-
-        return Enc(input_ids=input_ids, attention_mask=mask)
-
-
-def tiny_model():
-    cfg = ModelConfig(d_model=D, decoder_layers=2, decoder_heads=4, decoder_ff=64, dropout=0.0)
-    return SigilModel(cfg, encoder=TinyEncoder())
 
 
 def rows(n=24, seed=0):

@@ -9,7 +9,7 @@ from sigil_core.ids import SemanticId
 from sigil_data.ingestion.chunk import approx_tokens, chunk
 from sigil_data.ingestion.clean import clean, content_hash, html_to_text, quality
 from sigil_data.ingestion.dedup import dedup
-from sigil_data.mixing import balance_units, coverage, mix
+from sigil_data.mixing import balance_units, coverage, family_shares, mix
 from sigil_data.negatives.mining import FNStats, PrefixIndex, assemble, drop_false_negatives
 from sigil_data.query_generation.filters import LOW_COVERAGE, coverage_state, filter_queries, leaks
 from sigil_eval.baselines.bm25 import BM25
@@ -103,10 +103,10 @@ def test_mixing_ratios_caps_and_upsampling():
     d0 = [r for r in bal if r["doc_id"] == "d0"]
     d1 = [r for r in bal if r["doc_id"] == "d1"]
     assert any(r["weight"] == 3.0 for r in d0) and all(r["weight"] == 1.5 for r in d1)
-    mixed = mix(rows, {"synthetic": 0.6, "titles": 0.1, "logs": 0.15}, 1000)
-    fam = Counter(r["source"] for r in mixed)
-    assert fam["real_query"] == 1  # logs short: remainder goes elsewhere, no repeats
-    assert fam["synthetic_query"] >= 600
+    mixed = mix(rows, {"synthetic": 0.6, "titles": 0.1, "logs": 0.15, "metadata": 0.05})
+    assert len(mixed) == len(rows)  # reweighted, never dropped: the coverage floor is [FIXED]
+    shares = family_shares(mixed)
+    assert shares["synthetic"] == pytest.approx(0.6 / 0.85) and shares["logs"] == pytest.approx(0.15 / 0.85)
 
 
 def test_dataset_round_trip(tmp_path):

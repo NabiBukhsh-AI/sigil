@@ -68,6 +68,13 @@ GATES: tuple[Gate, ...] = (
 )
 
 
+# What an offline training run can measure by itself. Channel shares, latency, cost, and the
+# tenant-leak suite need shadow traffic and the security run; the release decision (§29)
+# evaluates every gate, and an unmeasured one fails there.
+OFFLINE = frozenset({"valid_id_rate", "ndcg@10", "recall@10", "mrr@10", "held_out_doc_recall@10", "ece",
+                     "stale_id_rate", "escape_rate", "old_doc_recall_regression", "cold_doc_recall"})
+
+
 @dataclass(frozen=True)
 class GateResult:
     name: str
@@ -106,13 +113,14 @@ def evaluate(
     *,
     kind: str = FULL,
     thresholds: Mapping[str, float] | None = None,
+    only: frozenset[str] | None = None,
 ) -> Verdict:
     """Apply every gate that applies to this release kind. First release (no incumbent):
     relative gates are skipped and say so; absolute gates still apply."""
     th = thresholds or load_thresholds()
     results = []
     for g in GATES:
-        if kind not in g.kinds:
+        if kind not in g.kinds or (only is not None and g.name not in only):
             continue
         t = float(th[g.threshold_key])
         v = candidate.get(g.metric)

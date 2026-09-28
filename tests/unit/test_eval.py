@@ -85,6 +85,14 @@ def test_unmeasured_gate_fails_and_adapter_gates_apply():
     assert {r.name for r in v.failures} == {"old_doc_recall_regression", "cold_doc_recall"}
 
 
+def test_offline_stage_checks_only_what_training_can_measure():
+    offline = {k: v for k, v in passing().items()
+               if k not in ("channel_c_query_share", "channel_a_result_share", "p95_latency_ms",
+                            "cost_per_1k_queries", "cross_tenant_leaks")}
+    assert gates.evaluate(offline, passing(), only=gates.OFFLINE).passed
+    assert not gates.evaluate(offline, passing()).passed  # the release decision still needs everything
+
+
 def test_bm25_ranks_and_tombstones():
     idx = BM25().add(["d1", "d2", "d3"], ["canine antibiotic course", "feline kidney disease", "canine diet"])
     assert idx.search("canine antibiotics course")[0][0] == "d1"

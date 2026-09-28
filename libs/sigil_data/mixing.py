@@ -44,25 +44,30 @@ def balance_units(rows: Sequence[dict], max_per_unit: int = 20, zero_log_upsampl
     return out
 
 
-def mix(rows: Sequence[dict], ratios: Mapping[str, float], total: int, seed: int = 0) -> list[dict]:
-    """Sample ``total`` rows matching family ratios. A family short of its quota passes the
-    remainder on to families with room, rather than being oversampled with repeats (real
-    logs are usually short early on)."""
-    rng = np.random.default_rng(seed)
-    fams: dict[str, list[int]] = defaultdict(list)
-    for i, r in enumerate(rows):
-        fams[FAMILY_OF_SOURCE[r["source"]]].append(i)
-    quota = {f: int(round(ratios.get(f, 0.0) * total)) for f in fams}
-    picked: list[int] = []
-    spare = 0
-    for f in sorted(fams, key=lambda f: (len(fams[f]) - quota[f], f)):  # shortest-handed first
-        q = quota[f] + spare
-        take = min(q, len(fams[f]))
-        spare = q - take
-        picked += list(rng.choice(fams[f], take, replace=False))
-    picked = sorted(picked)[:total]
-    rng.shuffle(picked)
-    return [rows[i] for i in picked]
+def mix(rows: Sequence[dict], ratios: Mapping[str, float]) -> list[dict]:
+    """Reweight families so each carries its target share of total loss weight.
+
+    Rows are never dropped: the per-unit coverage floor is [FIXED] (every unit keeps at
+    least ``min_queries_per_doc`` examples) while the ratios are [TUNE]. Subsampling to hit
+    a ratio would trade the first for the second. Families absent from the data (no real
+    logs yet) have their share renormalized over the families present.
+    """
+    total_w: dict[str, float] = defaultdict(float)
+    for r in rows:
+        total_w[FAMILY_OF_SOURCE[r["source"]]] += r.get("weight", 1.0)
+    present = {f: ratios.get(f, 0.0) for f in total_w if ratios.get(f, 0.0) > 0}
+    norm = sum(present.values()) or 1.0
+    grand = sum(total_w.values())
+    scale = {f: (present.get(f, 0.0) / norm) * grand / total_w[f] for f in total_w}
+    return [{**r, "weight": r.get("weight", 1.0) * scale[FAMILY_OF_SOURCE[r["source"]]]} for r in rows]
+
+
+def family_shares(rows: Sequence[dict]) -> dict[str, float]:
+    w: dict[str, float] = defaultdict(float)
+    for r in rows:
+        w[FAMILY_OF_SOURCE[r["source"]]] += r.get("weight", 1.0)
+    total = sum(w.values()) or 1.0
+    return {f: v / total for f, v in w.items()}
 
 
 def coverage(rows: Sequence[dict]) -> dict[str, int]:
