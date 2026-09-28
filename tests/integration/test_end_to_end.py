@@ -8,75 +8,24 @@ documents; reranker and GPU outages degrade instead of failing.
 
 from dataclasses import replace
 
-import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from sigil_core.telemetry import MissReason
-from sigil_decoding import DecodeConfig
-from sigil_eval.baselines.bm25 import BM25
-from sigil_identifiers.quantizer import RQKMeans
-from sigil_registry_client import MemoryRegistry
-from sigil_registry_client.records import DocState, Principal
+from sigil_eval.baselines.router import overlap_reranker
+from sigil_registry_client.records import Principal
 
-from services.gateway.main import Gateway, GatewayConfig, create_app, local_backends
-from services.gateway.schemas import ExplainRequest, RetrieveRequest
-from services.generative_retrieval.engine import Engine
-from services.generative_retrieval.snapshot_manager import SnapshotManager
-from services.ingestion.main import ContentStore, Pipeline
-from services.trie_builder.main import build_snapshot
-from tests.helpers import RouterScorer, hash_embed, overlap_reranker
+from scripts.local_stack import build, synthetic_corpus
+from services.gateway.main import create_app
+from services.gateway.schemas import ExplainRequest
 
-TOPICS, PER_TOPIC = 16, 10
 P = Principal("clinic")
-
-
-def doc_text(rng, t, i):
-    topic = [f"topic{t}word{j}" for j in range(12)]
-    return " ".join(list(rng.choice(topic, 30)) + [f"unique{i}a", f"unique{i}b", f"unique{i}c"])
-
-
-class World:
-    def __init__(self, tmp):
-        rng = np.random.default_rng(0)
-        self.docs = [(t, i, doc_text(rng, t, i)) for i in range(TOPICS * PER_TOPIC) for t in [i % TOPICS]]
-        q = RQKMeans(k=16, iters=10, restarts=1).fit(hash_embed([d for _, _, d in self.docs]))
-        self.reg = MemoryRegistry()
-        self.hot = BM25()
-        self.full = BM25()
-        self.tmp = tmp
-        self.pipe = Pipeline(self.reg, q, hash_embed, self.hot, ContentStore(tmp / "content"))
-        self.parent = {}
-        for t, i, text in self.docs:
-            r = self.pipe.add(tenant_id="clinic", title=f"Doc {i}", content=text, initial_load=True)
-            self.parent[i] = r["doc_uid"]
-        self.snaps = SnapshotManager("ids_v1")
-        self.rebuild()
-        self.engine = Engine(RouterScorer(q), self.snaps)
-        cfg = GatewayConfig(bundle_id="bundle_test", id_schema="ids_v1",
-                            decode=DecodeConfig(beam=16, prefixes_expanded=16),
-                            deadlines_ms={"generative": 10_000, "lexical": 10_000, "rerank": 10_000})
-        self.backends = local_backends(self.engine, self.hot, self.full, self.reg, overlap_reranker)
-        self.gw = Gateway(cfg, self.backends)
-
-    def rebuild(self):
-        info = build_snapshot(self.reg, self.tmp / "tries", "ids_v1")
-        self.snaps.swap(info["path"], info["sha256"])
-        self.full = BM25()
-        live = {str(r.semantic_id): f"{r.title}\n{r.rerank_snippet}" for r in self.reg.records()
-                if r.state not in (DocState.TOMBSTONED, DocState.QUARANTINED)}
-        self.full.add(live.keys(), live.values())
-        if hasattr(self, "backends"):
-            self.backends.full_lexical = self.full.search
-        return info
-
-    def ask(self, query, tenant="clinic", k=10, principal=P, **opts):
-        req = RetrieveRequest(query=query, tenant_id=tenant, k=k, options=opts or {})
-        return self.gw.retrieve(req, principal)[0]
 
 
 @pytest.fixture(scope="module")
 def world(tmp_path_factory):
-    return World(tmp_path_factory.mktemp("world"))
+    w = build(synthetic_corpus(), tmp_path_factory.mktemp("world"))
+    w.docs = synthetic_corpus()
+    return w
 
 
 def titles(resp):
@@ -87,7 +36,7 @@ def test_semantic_queries_retrieve_their_documents(world):
     hits, attributed_a = 0, 0
     for t, i, _ in world.docs[::4]:
         resp = world.ask(f"unique{i}a unique{i}b topic{t}word1 topic{t}word2")
-        assert resp["bundle_id"] == "bundle_test" and not resp["degraded_mode"]
+        assert resp["bundle_id"] == "bundle_local" and not resp["degraded_mode"]
         hits += f"Doc {i}" in titles(resp)
         attributed_a += sum(r["channel"] == "generative" for r in resp["results"])
     n = len(world.docs[::4])

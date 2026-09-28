@@ -52,6 +52,15 @@ class SnapshotManager:
                     old.trie.close()
         return new.version
 
+    def close(self) -> None:
+        """Unmap the active snapshot once in-flight readers finish (pod shutdown)."""
+        with self._lock:
+            ref, self._cur = self._cur, None
+            if ref is not None:
+                ref.retired = True
+                if ref.readers == 0:
+                    ref.trie.close()
+
     @contextmanager
     def acquire(self):
         with self._lock:
