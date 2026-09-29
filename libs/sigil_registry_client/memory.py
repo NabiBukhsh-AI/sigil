@@ -125,6 +125,20 @@ class MemoryRegistry:
                 if self._docs[u].state != DocState.TOMBSTONED:
                     self._docs[u] = self._docs[u].evolve(state=state)
 
+    def restore(self, records: Iterable[DocRecord]) -> MemoryRegistry:
+        """Load records exactly as exported (dev seeding, tests). Identifiers are kept, and the
+        counters resume past them so nothing is re-issued."""
+        with self._lock:
+            for rec in records:
+                self._docs[rec.doc_uid] = rec
+                self._by_sid[rec.semantic_id] = rec.doc_uid
+                if rec.state != DocState.TOMBSTONED:
+                    self._by_hash[(rec.tenant_id, rec.content_hash)] = rec.doc_uid
+                self._history.append((rec.doc_uid, rec.semantic_id, rec.created_at, None))
+                self.epoch = max(self.epoch, rec.corpus_epoch)
+            self._counter = PrefixCounter.from_issued(s for _, s, _, _ in self._history)
+        return self
+
     # -- reads ----------------------------------------------------------------------------
 
     def get(self, doc_uid: str) -> DocRecord | None:

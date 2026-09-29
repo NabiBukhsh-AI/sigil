@@ -26,7 +26,16 @@ def make_registry(cfg: dict):
         from sigil_registry_client.postgres import PostgresRegistry
 
         return PostgresRegistry(r["dsn"], schema, r.get("redis_url"), r.get("cache_ttl_seconds", 300))
-    return MemoryRegistry(schema)
+    reg = MemoryRegistry(schema)
+    if seed := os.environ.get("SIGIL_REGISTRY_SEED"):  # dev: registry.jsonl from bootstrap_corpus
+        import json
+        from pathlib import Path
+
+        from sigil_registry_client.http import record_from_wire
+
+        lines = Path(seed).read_text(encoding="utf-8").splitlines()
+        reg.restore(record_from_wire(json.loads(x)) for x in lines if x.strip())
+    return reg
 
 
 class ResolveIn(BaseModel):

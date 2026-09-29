@@ -37,7 +37,7 @@ class ContentStore:
     bucket or swap in an S3 client for production."""
 
     def __init__(self, root: str | Path):
-        self.root = Path(root)
+        self.root = Path(root).resolve()  # absolute: stored as file:// URIs
         self.root.mkdir(parents=True, exist_ok=True)
 
     def put(self, text: str) -> str:
@@ -48,8 +48,18 @@ class ContentStore:
             p.write_text(text, encoding="utf-8")
         return p.as_uri()
 
+    @staticmethod
+    def path(uri: str) -> Path:
+        from urllib.parse import urlparse
+        from urllib.request import url2pathname
+
+        return Path(url2pathname(urlparse(uri).path))
+
+    def get(self, uri: str) -> str:
+        return self.path(uri).read_text(encoding="utf-8")
+
     def purge(self, uri: str) -> None:
-        p = Path(uri.removeprefix("file:///").removeprefix("file://"))
+        p = self.path(uri)
         if p.exists():
             p.unlink()
 

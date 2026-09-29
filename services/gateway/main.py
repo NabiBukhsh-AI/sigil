@@ -482,8 +482,9 @@ def remote_backends(cfg: dict) -> Backends:
         r.raise_for_status()
         return np.array(r.json()["scores"])
 
+    # No reranker endpoint configured: rerank is skipped and responses say degraded_mode.
     return Backends(generative, lexical(ep["hot_lexical"]), lexical(ep["full_lexical"]),
-                    HttpRegistry(ep["registry"]), rerank)
+                    HttpRegistry(ep["registry"]), rerank if ep.get("reranker") else None)
 
 
 def from_env() -> FastAPI:
