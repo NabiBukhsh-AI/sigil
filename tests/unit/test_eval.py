@@ -77,6 +77,16 @@ def test_gates_pass_and_block():
     assert not gates.evaluate({**passing(), "recall@10": 0.689}, passing()).passed
 
 
+def test_first_release_must_beat_the_baseline():
+    # No incumbent and no baseline: relative gates cannot pass by being skipped.
+    v = gates.evaluate(passing())
+    assert {"ndcg@10", "recall@10", "mrr@10"} <= {r.name for r in v.failures}
+    floor = {"ndcg@10": 0.45, "recall@10": 0.65, "mrr@10": 0.35, "p95_latency_ms": 200.0, "cost_per_1k_queries": 2.0}
+    assert gates.evaluate(passing(), baseline=floor).passed
+    weaker = {**floor, "recall@10": 0.705}  # zero tolerance against the floor
+    assert "recall@10" in {r.name for r in gates.evaluate(passing(), baseline=weaker).failures}
+
+
 def test_unmeasured_gate_fails_and_adapter_gates_apply():
     m = passing()
     del m["ece"]

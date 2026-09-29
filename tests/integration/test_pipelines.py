@@ -54,7 +54,7 @@ def test_full_train_writes_a_verifiable_signed_bundle(setup):
         codebooks_dir=str(cb_dir), corpus=corpus, golden=golden, held_out=set(rep["held_out_doc_ids"]),
         out_dir=str(tmp / "bundles"), bundle_id="bundle_smoke", backbone="tiny", dataset="ds_smoke",
         corpus_snapshot="cs_2026_09_01", epoch_range=(0, 10**9), signing_key=b"k", steps=15, batch_size=16,
-        device="cpu", thresholds=LOOSE,
+        device="cpu", thresholds=LOOSE, incumbent={"ndcg@10": 0.0, "recall@10": 0.0, "mrr@10": 0.0},
     )
     assert report["metrics"]["valid_id_rate"] == 1.0
     assert report["offline_gates"]["passed"], report["offline_gates"]["summary"]
@@ -72,6 +72,8 @@ def test_default_gates_block_an_untrained_model(setup, tmp_path):
         corpus_snapshot="cs_2026_09_01", epoch_range=(0, 10**9), steps=1, batch_size=16, device="cpu",
     )
     assert not report["offline_gates"]["passed"]
+    # Without an incumbent it is judged against the BM25 floor, which it cannot beat.
+    assert "recall@10: " in report["offline_gates"]["summary"] and report["bm25_floor"]["recall@10"] > 0.9
     assert not (tmp_path / "bundle_blocked" / "manifest.json").exists()  # a report, never a bundle
     assert (tmp_path / "bundle_blocked" / "eval_report.json").exists()
 

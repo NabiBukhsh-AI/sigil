@@ -53,6 +53,16 @@ def evaluate_scorer(scorer, trie, golden: Sequence[tuple[str, set[str]]], sid_to
     return out
 
 
+def bm25_floor(corpus: list[dict], golden: Sequence[tuple[str, set[str]]]) -> dict:
+    """BM25 over the same corpus, scored on the same queries: the floor baseline (§25.2)."""
+    from sigil_eval.baselines.bm25 import BM25
+
+    texts = [f"{r.get('title') or ''}\n{r['text']}" for r in corpus]
+    index = BM25().add([r["doc_uid"] for r in corpus], texts)
+    run = {f"q{n}": [k for k, _ in index.search(q, 100)] for n, (q, _) in enumerate(golden)}
+    return metrics.evaluate_run(run, {f"q{n}": dict.fromkeys(rel, 1) for n, (_, rel) in enumerate(golden)})
+
+
 def loop_config(stage: dict, **over):
     from sigil_training.loop import LoopConfig
 
@@ -116,9 +126,11 @@ def train_bundle(*, model, tokenizer, rows: list[dict], cfg: dict, trie_path: st
 
     escape = sum(SemanticId.parse(r["semantic_id"]).escaped for r in corpus) / max(len(corpus), 1)
     candidate["escape_rate"] = escape
+    floor = bm25_floor(corpus, test)  # a first release must beat this (§25.2, Phase 4)
     verdict = gates.evaluate({k: v for k, v in candidate.items() if v is not None}, incumbent,
-                             thresholds=thresholds, only=gates.OFFLINE)
-    report.update(metrics=candidate, offline_gates={"passed": verdict.passed, "summary": verdict.summary()})
+                             thresholds=thresholds, only=gates.OFFLINE, baseline=floor)
+    report.update(metrics=candidate, bm25_floor=floor,
+                  offline_gates={"passed": verdict.passed, "summary": verdict.summary()})
 
     out = Path(out_dir) / bundle_id
     out.mkdir(parents=True, exist_ok=False)

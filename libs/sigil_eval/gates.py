@@ -114,9 +114,16 @@ def evaluate(
     kind: str = FULL,
     thresholds: Mapping[str, float] | None = None,
     only: frozenset[str] | None = None,
+    baseline: Mapping[str, float] | None = None,
 ) -> Verdict:
-    """Apply every gate that applies to this release kind. First release (no incumbent):
-    relative gates are skipped and say so; absolute gates still apply."""
+    """Apply every gate that applies to this release kind.
+
+    Relative gates compare against the incumbent bundle. A first release has no incumbent and
+    is compared against ``baseline`` instead, the §25.2 BM25 floor, with zero tolerance: it
+    must beat the floor, not merely come close (Phase 4: "if it cannot beat BM25, do not
+    proceed"). With neither, relative gates fail as unmeasured. Skipping them would let an
+    untrained model through on a small corpus, where absolute floors are easy to clear by luck.
+    """
     th = thresholds or load_thresholds()
     results = []
     for g in GATES:
@@ -128,7 +135,12 @@ def evaluate(
         if v is None:
             results.append(GateResult(g.name, False, None, t, inc, "metric not measured"))
         elif g.relative and inc is None:
-            results.append(GateResult(g.name, True, v, t, None, "no incumbent; skipped"))
+            floor = None if baseline is None else baseline.get(g.metric)
+            if floor is None:
+                results.append(GateResult(g.name, False, float(v), t, None, "no incumbent or baseline to compare"))
+            else:
+                results.append(GateResult(g.name, bool(g.check(float(v), 0.0, float(floor))), float(v), 0.0,
+                                          float(floor), "first release: must beat the baseline"))
         else:
             results.append(GateResult(g.name, bool(g.check(float(v), t, inc)), float(v), t, inc))
     return Verdict(all(r.passed for r in results), tuple(results))

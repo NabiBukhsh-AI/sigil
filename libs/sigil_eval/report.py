@@ -25,7 +25,7 @@ from sigil_eval.metrics import evaluate_run
 def build(qrels: dict, runs: dict[str, dict], extra: dict, incumbent: dict | None, kind: str, thresholds: dict | None):
     systems = {name: evaluate_run(run, qrels) for name, run in runs.items()}
     candidate = {**systems.get("sigil", {}), **extra}
-    verdict = gates.evaluate(candidate, incumbent, kind=kind, thresholds=thresholds)
+    verdict = gates.evaluate(candidate, incumbent, kind=kind, thresholds=thresholds, baseline=systems.get("bm25"))
     report = {
         "systems": systems,
         "gates": {"passed": verdict.passed, "results": [r.__dict__ for r in verdict.results]},
