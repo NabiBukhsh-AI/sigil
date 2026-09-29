@@ -68,7 +68,10 @@ def tier1(cands: list[Cand], resolved: Mapping[SemanticId, Resolved], principal:
             if audit is not None:
                 audit.append({"event": "acl_drop", "tenant": principal.tenant_id, "doc_uid": rec.doc_uid})
             continue
-        if rec.id_schema_version != id_schema:
+        # Every registry lookup is scoped to the bundle's schema, so an alias hit already matched
+        # an identifier of that schema. During a migration the record itself may carry the other
+        # schema (§15.6: both identifier sets live at once); a direct hit never should.
+        if not hit.via_alias and rec.id_schema_version != id_schema:
             out.dropped["schema"] += 1  # a deployment error, alarmed by the caller
             continue
         if filters and not _passes_filters(rec.metadata, filters):
